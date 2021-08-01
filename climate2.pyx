@@ -1,4 +1,5 @@
 # cython: language_level=3, boundscheck=False, 
+# distutils: language=c++
 # Cython Extension for Climate Markov Prediction
 # Copyright (C) 2021 Zhang Maiyun.
 
