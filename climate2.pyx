@@ -12,7 +12,6 @@ from scipy.stats import norm
 
 cimport numpy as np
 cimport scipy.optimize as so
-from cpython cimport array
 
 cdef class Station:
     _f: str
@@ -153,30 +152,26 @@ cdef class NDTemperaturePredict:
         cdef np.float64_t sum_l2_norms = (self._weights * (line1 - line2) ** 2).sum()
         return sum_l2_norms
 
-    cpdef tuple loocv_loss(self): # -> Tuple[np.floating, np.floating, np.floating]
+    cpdef np.float64_t loocv_loss(self): # -> np.floating
         """LOOCV average loss function."""
-        cdef array.array errors = array.array('d')
-        cdef np.ndarray[np.uint32_t, ndim=1] masked_dates
+        cdef np.ndarray[np.float64_t, ndim=1] errors = np.zeros(self._len)
+        cdef np.ndarray[np.uint8_t, ndim=1] data_mask = np.zeros(self._len, dtype='B')
         cdef np.ndarray[np.float64_t, ndim=1] loo
-        cdef np.ndarray[np.float64_t, ndim=2] other_xs
-        cdef np.ndarray[np.float64_t, ndim=1] other_ys
-        cdef np.float64_t error, prediction
+        cdef np.float64_t prediction
         cdef Py_ssize_t n
         for n in range(self._len):
             loo = self._xs[n]
-            other_xs = np.concatenate((self._xs[:n], self._xs[n+1:]))
-            other_ys = np.concatenate((self._ys[:n], self._ys[n+1:]))
-            masked_dates = np.concatenate((self._dates[:n], self._dates[n+1:]))
+            # Mask this item to LOO
+            data_mask[n] = 1
             prediction = self._raw_predict(
                 loo,
                 self._dates[n],
-                xs_override=other_xs,
-                ys_override=other_ys,
-                date_override=masked_dates
+                mask=data_mask
             )
-            error = (self._ys[n] - prediction) ** 2
-            errors.append(error)
-        return np.mean(errors) , np.max(errors), np.min(errors)
+            errors[n] = (self._ys[n] - prediction) ** 2
+            # Clear mask
+            data_mask[n] = 0
+        return errors.mean()
     
     cpdef np.float64_t _optimizer_loss(
         self,
@@ -184,7 +179,7 @@ cdef class NDTemperaturePredict:
     ):
         """Returning np.floating to match precision."""
         self.set_weights(weights)
-        cdef np.float64_t loss = self.loocv_loss()[0]
+        cdef np.float64_t loss = self.loocv_loss()
         print(f"Current loss: {loss}, weights: {weights}", end="\r")
         return loss
 
@@ -207,51 +202,42 @@ cdef class NDTemperaturePredict:
         self,
         np.ndarray past_week_temperature,
         np.uint32_t date,
-        np.ndarray xs_override = None,
-        np.ndarray ys_override = None,
-        np.ndarray date_override = None
+        np.ndarray mask = None
      ) except -999:
         """Predict a temperature change for the following day without normalization.
 
         `past_week_temperature`: Temperatures for the past seven days. Shape: (self._degree,)
         `date`: Date representation of `past_week_temperature[-1]`.
-        `xs_override`: Override self._xs for evaluation. Shape: (n, self._degree)
-        `ys_override`: Override self._ys for evaluation. Shape: (n, )
-        `date_override`: Override self._dates for evaluation. Shape: (n, )
+        `mask`: Mask data for evaluation. Shape: (n, )
 
         Return: Temperature prediction.
         """
-        # Extract overrides
-        cdef np.ndarray[np.float64_t, ndim=2] xs = self._xs if xs_override is None else xs_override
-        cdef np.ndarray[np.float64_t, ndim=1] ys = self._ys if ys_override is None else ys_override
-        cdef np.ndarray[np.uint32_t, ndim=1] dates = self._dates if date_override is None else date_override
         # The weights from the date difference
-        cdef np.ndarray[np.float64_t, ndim=1] date_weight = norm(date, self._sigma).pdf(dates)
+        cdef np.ndarray[np.float64_t, ndim=1] date_weight = np.ma.masked_array(
+            data=norm(date, self._sigma).pdf(self._dates),
+            mask=mask
+        )
         # The weights from the distance difference
         cdef np.ndarray[np.float64_t, ndim=1] dist_weight = np.add.reduce(
-            self._weights * (past_week_temperature - xs) ** 2,
+            self._weights * (past_week_temperature - self._xs) ** 2,
             axis=1
         )
-        return np.average(ys, weights = date_weight * dist_weight)
+        return np.average(self._ys, weights = date_weight * dist_weight)
     
     cpdef np.float64_t predict(
         self,
         np.ndarray past_week_temperature,
         np.uint32_t date,
-        np.ndarray xs_override = None,
-        np.ndarray ys_override = None,
-        np.ndarray date_override = None
+        np.ndarray mask = None
     ) except -999:
         """Predict a temperature change for the following day after normalization.
 
         `past_week_temperature`: Temperatures for the past seven days. Shape: (self._degree,)
         `date`: Date representation of `past_week_temperature[-1]`.
-        `xs_override`: Override self._xs for evaluation. Shape: (n, self._degree)
-        `ys_override`: Override self._ys for evaluation. Shape: (n, )
-        `date_override`: Override self._dates for evaluation. Shape: (n, )
+        `mask`: Mask data for evaluation. Shape: (n, )
 
         Return: Temperature prediction.
         """
         normd, scale, offset = self.normalize(past_week_temperature)
-        result = self._raw_predict(normd, date, xs_override, ys_override, date_override)
+        result = self._raw_predict(normd, date, mask)
         return result * scale + offset
