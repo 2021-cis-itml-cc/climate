@@ -1,5 +1,15 @@
-# Climate Prediction
+# Climate Prediction - 2021 CMU Project
 
+## Dataset
+National Centers for Environmental Information
+Global Surface Summary of Day Data (GSOD).
+
+Can be retreived through FTP at <ftp://ftp.ncdc.noaa.gov/pub/data/gsod>.
+
+## Items
+ - `ipynbs/ClimateFFT.ipynb`: Real Fourier transform analysis (583620, all).
+
+## Temporary data
 Markov 2 CV:
 ```
 Station 010100: SHANGHAI	+31.400N, +121.467E, +0004.0elev
