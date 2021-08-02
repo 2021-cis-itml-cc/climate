@@ -5,8 +5,9 @@
 
 from os import PathLike
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
+import numpy as np
 import pandas
 
 try:
@@ -22,10 +23,10 @@ def sliding_window(dd: NDArray, bsize: int) -> NDArray:
 
 class GsodDataset:
     """GSOD Dataset reader and preprocessor.
-    
+
     `basepath`: Path to gsod. The next level should be year folders.
     """
-    _basepath: str
+    _basepath: Path
     _COLSPEC: List[Tuple[int, int]] = [
         (0,   6),    # STN--- WMO/DATSAV3 Station number
         (7,   12),   # WBAN   Weather Bureau Air Force Navy number
@@ -81,37 +82,78 @@ class GsodDataset:
                      #            observations--it's still possible that
                      #            precip occurred but was not reported.
         (125, 130),  # SNDP   Snow depth in inches
-        (132, 138)   # FRSHTT Indicators (1 = yes, 0 = no/not
+                     # FRSHTT Indicators (1 = yes, 0 = no/not
                      #            reported) for the occurrence during the
                      #            day of:
-                     #            Fog ('F' - 1st digit).
-                     #            Rain or Drizzle ('R' - 2nd digit).
-                     #            Snow or Ice Pellets ('S' - 3rd digit).
-                     #            Hail ('H' - 4th digit).
-                     #            Thunder ('T' - 5th digit).
-                     #            Tornado or Funnel Cloud ('T' - 6th
-                     #            digit).
+        (132, 133),  # Fog ('F' - 1st digit).
+        (133, 134),  # Rain or Drizzle ('R' - 2nd digit).
+        (134, 135),  # Snow or Ice Pellets ('S' - 3rd digit).
+        (135, 136),  # Hail ('H' - 4th digit).
+        (136, 137),  # Thunder ('T' - 5th digit).
+        (137, 138)  # Tornado or Funnel Cloud ('T' - 6th
+        #            digit).
     ]
-    _NAMES: List[str] = ["STN", "WBAN", "DATE", "TEMP", "TEMPCOUNT", "DEWP",
-                         "DEWPCOUNT", "SLP", "SLPCOUNT", "STP", "STPCOUNT",
-                         "VISIB", "VISIBCOUNT", "WDSP", "WDSPCOUNT", "MXSPD",
-                         "GUST", "MAX", "MAXFLAG", "MIN", "MINFLAG", "PRCP",
-                         "PRCPFLAG", "SNDP", "FRSHTT"]
+    _NAMES: List[str] = ["STN", "WBAN", "DATE", "TEMP", "TEMP_COUNT", "DEWP",
+                         "DEWP_COUNT", "SLP", "SLP_COUNT", "STP", "STP_COUNT",
+                         "VISIB", "VISIB_COUNT", "WDSP", "WDSP_COUNT", "MXSPD",
+                         "GUST", "MAX", "MAX_FLAG", "MIN", "MIN_FLAG", "PRCP",
+                         "PRCP_FLAG", "SNDP", "FOG", "RAIN", "SNOW", "HAIL",
+                         "THUNDER", "TORNADO"]
+    _DTYPES: Dict[str, str] = {
+        "STN": "uint32",
+        "WBAN": "int64",
+        "TEMP": "float64",
+        "TEMP_COUNT": "uint8",
+        "DEWP": "float64",
+        "DEWP_COUNT": "uint8",
+        "SLP": "float64",
+        "SLP_COUNT": "uint8",
+        "STP": "float64",
+        "STP_COUNT": "uint8",
+        "VISIB": "float64",
+        "VISIB_COUNT": "uint8",
+        "WDSP": "float64",
+        "WDSP_COUNT": "uint8",
+        "MXSPD": "float64",
+        "GUST": "float64",
+        "MAX": "float64",
+        "MAX_FLAG": "U1",
+        "MIN": "float64",
+        "MIN_FLAG": "U1",
+        "PRCP": "float64",
+        "PRCP_FLAG": "U1",
+        "SNDP": "float64",
+        "FOG": "bool",
+        "RAIN": "bool",
+        "SNOW": "bool",
+        "HAIL": "bool",
+        "THUNDER": "bool",
+        "TORNADO": "bool"
+    }
 
     def __init__(self, basepath: PathLike):
         self._basepath = Path(basepath)
-       
+
     @staticmethod
     def fix_index(dframe: pandas.DataFrame) -> pandas.DataFrame:
         """Fix missing date indices."""
         new_idx = pandas.date_range(min(dframe.index), max(dframe.index))
         return dframe.reindex(new_idx)
 
-    def read(self, *, stn: str, year: str, wban: str = "?????") -> pandas.DataFrame:
+    def read(self, *, stn: str, year: str = "????",
+             wban: str = "?????") -> pandas.DataFrame:
         """Read the files as specified and return a combined DataFrame."""
         return pandas.concat((
             pandas.read_fwf(p, index_col=2, header=1, colspecs=self._COLSPEC,
                             parse_dates=[2], names=self._NAMES,
-                            compression="infer")
+                            dtype=self._DTYPES, compression="infer")
             for p in self._basepath.glob(f"{year}/{stn}-{wban}-{year}.op*"))
         ).sort_values("DATE")
+
+    def read_continuous(self, *, stn: str, year: str = "????",
+                        wban: str = "?????",
+                        interpolate: bool = False) -> pandas.DataFrame:
+        """Read the files as specified and return a DataFrame that has
+        a continuous index."""
+        fixed = self.fix_index(self.read(stn=stn, year=year, wban=wban))
+        return fixed.interpolate() if interpolate else fixed
