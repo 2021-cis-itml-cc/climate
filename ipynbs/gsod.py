@@ -24,7 +24,9 @@ def sliding_window(dd: NDArray, bsize: int) -> NDArray:
 class GsodDataset:
     """GSOD Dataset reader and preprocessor.
 
-    `basepath`: Path to gsod. The next level should be year folders.
+    Parameters
+    ----------
+        basepath: Path to gsod. The next level should be year folders.
     """
     _basepath: Path
     _COLSPEC: List[Tuple[int, int]] = [
@@ -136,24 +138,74 @@ class GsodDataset:
 
     @staticmethod
     def fix_index(dframe: pandas.DataFrame) -> pandas.DataFrame:
-        """Fix missing date indices."""
+        """Fix missing date indices.
+
+        Parameters
+        ----------
+            dframe: DataFrame with a DateIndex to be fixed
+
+        Returns
+        -------
+        DataFrame
+            The DataFrame after being fixed.
+        """
         new_idx = pandas.date_range(min(dframe.index), max(dframe.index))
         return dframe.reindex(new_idx)
 
+    def read_at(self, path: PathLike) -> pandas.DataFrame:
+        """Read the file at `path`.
+
+        Parameters
+        ----------
+            path: Path to the dataset file.
+
+        Returns
+        -------
+        DataFrame
+            The read table as-is.
+        """
+        return pandas.read_fwf(path, index_col=2, header=1, dtype=self._DTYPES,
+                               colspecs=self._COLSPEC, parse_dates=[2],
+                               names=self._NAMES, compression="infer")
+
     def read(self, *, stn: str, year: str = "????",
              wban: str = "?????") -> pandas.DataFrame:
-        """Read the files as specified and return a combined DataFrame."""
+        """Read the files as specified.
+
+        Parameters
+        ----------
+            stn: WMO/DATSAV3 Station number as a 6-char string.
+            year: Year as a 4-char string.
+            wban: Optional Weather Bureau Air Force Navy number. Default: all.
+                  If specified, it must match the given `stn`.
+
+        Returns
+        -------
+        DataFrame
+            Combined DataFrame from all matched files, sorted by date.
+        """
         return pandas.concat((
-            pandas.read_fwf(p, index_col=2, header=1, colspecs=self._COLSPEC,
-                            parse_dates=[2], names=self._NAMES,
-                            dtype=self._DTYPES, compression="infer")
+            self.read_at(p)
             for p in self._basepath.glob(f"{year}/{stn}-{wban}-{year}.op*"))
         ).sort_values("DATE")
 
     def read_continuous(self, *, stn: str, year: str = "????",
                         wban: str = "?????",
                         interpolate: bool = False) -> pandas.DataFrame:
-        """Read the files as specified and return a DataFrame that has
-        a continuous index."""
+        """Read the files as specified and make the index continuous.
+
+        Parameters
+        ----------
+            stn: WMO/DATSAV3 Station number as a 6-char string.
+            year: Year as a 4-char string.
+            wban: Optional Weather Bureau Air Force Navy number. Default: all.
+                  If specified, it must match the given `stn`.
+            interpolate: Whether to linearly interpolate missing datapoints.
+
+        Returns
+        -------
+        DataFrame
+            Combined DataFrame from all matched files, sorted by date.
+        """
         fixed = self.fix_index(self.read(stn=stn, year=year, wban=wban))
         return fixed.interpolate() if interpolate else fixed
