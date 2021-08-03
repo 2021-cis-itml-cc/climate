@@ -18,7 +18,7 @@ except ImportError:
 
 def sliding_window(dd: NDArray, bsize: int) -> NDArray:
     """Sliding windows from an 1D array."""
-    return np.array([dd[1][n:n+bsize] for n in range(len(dd[1]) - bsize + 1)])
+    return np.array([dd[n:n+bsize] for n in range(len(dd) - bsize + 1)])
 
 
 class GsodDataset:
