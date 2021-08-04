@@ -13,9 +13,9 @@ In this project, we are mainly using station `722860` since it has a long
 recording history.
 
 ## Items
- - `ipynbs/ClimateFFT.ipynb`: Real Fourier transform analysis of the recurrent
+ - `00-FFT.ipynb`: Real Fourier transform analysis of the recurrent
     period.
- - `ipynbs/EMD.ipynb`: Complete empirical mode decomposition of periods
+ - `10-EMD.ipynb`: Complete empirical mode decomposition of periods
     and trends.
- - `ipynbs/LSTM.ipynb`: Building a long short-term memory model.
- - `ipynbs/Ensemble.ipynb`: Combining different models for different modes.
+ - `11-LSTM.ipynb`: Building a long short-term memory model.
+ - `20-Ensemble.ipynb`: Combining different models for different modes.

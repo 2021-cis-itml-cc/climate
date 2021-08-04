@@ -139,3 +139,7 @@ cython_debug/
 climate2.c
 climate2.cpp
 climate2.html
+
+# Dataset and execution output
+runtime/*
+!runtime/.gitkeep
