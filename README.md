@@ -1,5 +1,7 @@
 # Climate Prediction - 2021 CIS&CMU Project
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/myzhang1029/climate/HEAD)
+
 ## Problem
 Predicting future temperature with machine learning methods.
 
