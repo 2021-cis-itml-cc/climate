@@ -66,7 +66,7 @@ def sliding_window(seq: NDArray, width: int) -> NDArray:
         Creates a dataset of sliding windows over a timeseries
         provided as array.
     """
-    return np.array([dd[n:n+bsize] for n in range(len(dd) - bsize + 1)])
+    return np.array([seq[n:n + width] for n in range(len(seq) - width + 1)])
 
 
 class GsodDataset:
