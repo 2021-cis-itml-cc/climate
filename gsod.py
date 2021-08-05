@@ -224,7 +224,7 @@ class GsodDataset:
         DataFrame
             The read table as-is.
         """
-        return pandas.read_fwf(path, index_col=2, header=1, dtype=self._DTYPES,
+        return pandas.read_fwf(path, index_col=2, header=0, dtype=self._DTYPES,
                                colspecs=self._COLSPEC, parse_dates=[2],
                                names=self._NAMES, compression="infer")
 
