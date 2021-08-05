@@ -6,11 +6,13 @@ Predicting future temperature with machine learning methods.
 ## Dataset
 National Centers for Environmental Information
 Global Surface Summary of Day Data (GSOD).
-
-Can be retreived through FTP at <ftp://ftp.ncdc.noaa.gov/pub/data/gsod>.
+See [GSOD README](https://github.com/myzhang1029/climate/blob/main/README_GSOD.txt)
+for information on how to obtain it and/or its terms and restrictions.
 
 In this project, we are mainly using station `722860` since it has a long
-recording history.
+recording history. To run the notebooks, place the dataset at `runtime/GSOD`,
+so that `runtime/GSOD/2021` contains `.op` or `.op.gz` data files.
+For example, `runtime/GSOD/2021/583620-99999-2021.op.gz` should exist.
 
 ## Items
  - [`gsod.py`](https://github.com/myzhang1029/climate/blob/main/gsod.py):
