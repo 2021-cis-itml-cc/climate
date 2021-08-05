@@ -17,9 +17,11 @@ so that `runtime/GSOD/2021` contains `.op` or `.op.gz` data files.
 For example, `runtime/GSOD/2021/583620-99999-2021.op.gz` should exist.
 
 ## Items
+ Use those Notebooks by this order to start.
  - [`gsod.py`](https://github.com/myzhang1029/climate/blob/main/gsod.py):
     Dataset helper and common functions.
- - [`00-FFT.ipynb`](https://github.com/myzhang1029/climate/blob/main/00-FFT.ipynb):
+ - [`00-Search_Stations.ipynb`](https://github.com/myzhang1029/climate/blob/main/00-Search_Stations.ipynb):
+ - [`01-FFT.ipynb`](https://github.com/myzhang1029/climate/blob/main/01-FFT.ipynb):
     Real Fourier transform analysis of the recurrent period.
  - [`10-EMD.ipynb`](https://github.com/myzhang1029/climate/blob/main/10-EMD.ipynb):
     Complete empirical mode decomposition of periods and trends.
