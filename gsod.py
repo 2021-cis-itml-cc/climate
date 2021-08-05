@@ -1,5 +1,3 @@
-# Data helpers
-# Reference: ftp://ftp.ncdc.noaa.gov/pub/data/gsod/readme.txt
 
 """GSOD Dataset helper."""
 
@@ -34,8 +32,40 @@ def suppress_tf_log():
     alogger.set_verbosity(alogger.FATAL)
 
 
-def sliding_window(dd: NDArray, bsize: int) -> NDArray:
-    """Sliding windows from an 1D array."""
+def sliding_window(seq: NDArray, width: int) -> NDArray:
+    """Sliding windows from an 1D array.
+
+    Parameters
+    ----------
+    seq : NDArray
+        The sequence to separate
+    width : int
+        Width of the window
+
+    Returns
+    -------
+    NDArray
+        Separated windows with shape (len(seq) - width + 1, width)
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from gsod import sliding_window
+    >>> sequence = np.arange(10)
+    >>> sliding_window(sequence, 5)
+    array([[0, 1, 2, 3, 4],
+           [1, 2, 3, 4, 5],
+           [2, 3, 4, 5, 6],
+           [3, 4, 5, 6, 7],
+           [4, 5, 6, 7, 8],
+           [5, 6, 7, 8, 9]])
+
+    See Also
+    --------
+    tensorflow.keras.preprocessing.timeseries_dataset_from_array :
+        Creates a dataset of sliding windows over a timeseries
+        provided as array.
+    """
     return np.array([dd[n:n+bsize] for n in range(len(dd) - bsize + 1)])
 
 
@@ -44,9 +74,17 @@ class GsodDataset:
 
     Parameters
     ----------
-        basepath: Path to gsod. The next level should be year folders.
+    basepath : PathLike
+        Path to GSOD. The next level should be year folders.
+
+    References
+    ----------
+    .. [1] `GSOD Dataset Description
+        <ftp://ftp.ncdc.noaa.gov/pub/data/gsod/readme.txt>`_
     """
+
     _basepath: Path
+    # Specification of the dataset files.
     _COLSPEC: List[Tuple[int, int]] = [
         (0,   6),    # STN--- WMO/DATSAV3 Station number
         (7,   12),   # WBAN   Weather Bureau Air Force Navy number
@@ -113,12 +151,14 @@ class GsodDataset:
         (137, 138)  # Tornado or Funnel Cloud ('T' - 6th
         #            digit).
     ]
+    # Names to use for the pandas DataFrame columns.
     _NAMES: List[str] = ["STN", "WBAN", "DATE", "TEMP", "TEMP_COUNT", "DEWP",
                          "DEWP_COUNT", "SLP", "SLP_COUNT", "STP", "STP_COUNT",
                          "VISIB", "VISIB_COUNT", "WDSP", "WDSP_COUNT", "MXSPD",
                          "GUST", "MAX", "MAX_FLAG", "MIN", "MIN_FLAG", "PRCP",
                          "PRCP_FLAG", "SNDP", "FOG", "RAIN", "SNOW", "HAIL",
                          "THUNDER", "TORNADO"]
+    # Datatypes to use for the columns.
     _DTYPES: Dict[str, str] = {
         "STN": "uint32",
         "WBAN": "int64",
@@ -160,7 +200,8 @@ class GsodDataset:
 
         Parameters
         ----------
-            dframe: DataFrame with a DateIndex to be fixed
+        dframe : DataFrame
+            DataFrame with a DateIndex to be fixed.
 
         Returns
         -------
@@ -175,7 +216,8 @@ class GsodDataset:
 
         Parameters
         ----------
-            path: Path to the dataset file.
+        path : PathLike
+            Path to the dataset file.
 
         Returns
         -------
@@ -192,10 +234,13 @@ class GsodDataset:
 
         Parameters
         ----------
-            stn: WMO/DATSAV3 Station number as a 6-char string.
-            year: Year as a 4-char string.
-            wban: Optional Weather Bureau Air Force Navy number. Default: all.
-                  If specified, it must match the given `stn`.
+        stn : str
+            WMO/DATSAV3 Station number as a 6-char string.
+        year : str
+            Year as a 4-char string.
+        wban : str, optional
+            Weather Bureau Air Force Navy number. Default: all.
+            If specified, it must match the given `stn`.
 
         Returns
         -------
@@ -214,11 +259,15 @@ class GsodDataset:
 
         Parameters
         ----------
-            stn: WMO/DATSAV3 Station number as a 6-char string.
-            year: Year as a 4-char string.
-            wban: Optional Weather Bureau Air Force Navy number. Default: all.
-                  If specified, it must match the given `stn`.
-            interpolate: Whether to linearly interpolate missing datapoints.
+        stn : str
+            WMO/DATSAV3 Station number as a 6-char string.
+        year : str
+            Year as a 4-char string.
+        wban : str, optional
+            Weather Bureau Air Force Navy number. Default: all.
+            If specified, it must match the given `stn`.
+        interpolate : bool
+            Whether to linearly interpolate missing datapoints.
 
         Returns
         -------
