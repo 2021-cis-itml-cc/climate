@@ -14,53 +14,6 @@ from scipy.stats import norm
 cimport numpy as np
 cimport scipy.optimize as so
 
-cdef class Station:
-    _f: str
-    _stations: NDArray[np.uint32]
-    _temperatures: NDArray[np.float64]
-    _dates: NDArray[np.datetime64]
-
-    def __cinit__(self, file: str):
-        self._f = file
-        self._read()
-
-    cdef _read(self):
-        """Read and parse data file."""
-        cdef list stations = []
-        cdef list temperatures = []
-        cdef list dates = []
-        cdef int n
-        cdef str line
-
-        for n, line in enumerate(open(self._f, mode="rt")):
-            if n == 0:
-                # Skip header
-                continue
-            # Use splitlines to avoid killing noeol files
-            line = line.splitlines()[0]
-            stations.append(np.uint32(line[0:6]))
-            temperatures.append(np.float64(line[24:30]))
-            dates.append(np.datetime64(
-                f"{line[14:18]}-{line[18:20]}-{line[20:22]}"))
-        self._stations = np.array(stations)
-        self._temperatures = np.array(temperatures)
-        self._dates = np.array(dates)
-
-    cpdef np.ndarray[np.float64_t, ndim=1] get_temperatures(self): # -> NDArray[np.floating]:
-        """Get the temperature data in this file."""
-        return self._temperatures
-
-    cpdef np.ndarray[np.float64_t, ndim=1] get_dates(self): # -> NDArray[np.datetime64]:
-        """Get the dates in this file."""
-        return self._dates
-
-    cpdef np.ndarray[np.uint32_t, ndim=1] get_date_diffs_jan1(self): # -> NDArray[np.integer]:
-        """Get the dates as days from Jan 1st in this file."""
-        return np.array([
-            date - date.astype("datetime64[Y]")
-            for date in self._dates
-        ]).astype(np.uint32)
-
 
 cdef class NDTemperaturePredict:
     """Predict temperatures with customizable n-degree Markov methods."""
@@ -87,15 +40,15 @@ cdef class NDTemperaturePredict:
         """Getter for self._degree."""
         return self._degree
     
-    cpdef put_data(self, dataset: Station):
+    cpdef put_data(self, temperatures: NDArray[np.floating], days_from_jan1: NDArray[np.integer]):
         """Add data."""
-        cdef np.ndarray[np.float64_t, ndim=2] tmp = np.array(list(self.normalized_degree_wise(dataset.get_temperatures())))
+        cdef np.ndarray[np.float64_t, ndim=2] tmp = np.array(list(self.normalized_degree_wise(temperatures)))
         self._len += len(tmp)
         self._xs = np.concatenate((self._xs, tmp.T[:-1].T))
         self._ys = np.concatenate((self._ys, tmp.T[-1]))
         self._dates = np.concatenate((
             self._dates,
-            dataset.get_date_diffs_jan1()[7:]
+            days_from_jan1[7:].astype(np.int32)
         ))
 
     cpdef set_stdev(self, float sigma):
@@ -105,7 +58,7 @@ cdef class NDTemperaturePredict:
         """
         self._sigma = sigma
         
-    cpdef set_weights(self, weights: NDArray[np.floating]):
+    cpdef set_weights(self, np.ndarray[np.float64_t] weights):
         """Set distance weights.
         
         `weights`: Weights.
