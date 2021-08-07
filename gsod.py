@@ -1,12 +1,20 @@
 
 """GSOD Dataset helper."""
 
+import logging
+import os
+from functools import lru_cache
 from os import PathLike
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas
+import tensorflow as tf
+from absl import logging as alogger
+from matplotlib_inline.backend_inline import set_matplotlib_formats
+from tensorflow.python.data.ops.dataset_ops import MapDataset
 
 try:
     from numpy.typing import NDArray
@@ -16,17 +24,11 @@ except ImportError:
 
 def enable_svg_graphing():
     """Enable matplotlib inline SVG graphs."""
-    from matplotlib_inline.backend_inline import set_matplotlib_formats
     set_matplotlib_formats("svg")
 
 
 def suppress_tf_log():
     """Suppress extra TensorFlow logs."""
-    import logging
-    import os
-
-    import tensorflow as tf
-    from absl import logging as alogger
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     tf.get_logger().setLevel(logging.FATAL)
     alogger.set_verbosity(alogger.FATAL)
@@ -287,3 +289,221 @@ class GsodDataset:
         fixed = self.fix_index(
             self.read(stn=stn, year=year, wban=wban), method=fill)
         return fixed.interpolate() if interpolate else fixed
+
+# Sliding Window Generator.
+# Mostly from [TensorFlow Time Series Example]
+# (https://www.tensorflow.org/tutorials/structured_data/time_series),
+# but also includes my own comments and modifications.
+
+
+class WindowGenerator:
+    """Build a window from the data for training.
+
+                       | - - total size - - |
+        input_indices: 0 1 2 3 4 5
+        output_indices:        4 5 6 7 8 9 10
+                       |  input  | - shft - |
+                               | - output - |
+
+    Parameters
+    ----------
+        df : DataFrame
+            DataFrame containing the dataset.
+        input_width : int
+            Width of the feature input.
+        label_width : int
+            Width of the outputs.
+        shift : int
+            Shift (of the end) between the input window and the output window.
+        batch_size : int
+            Size of training batches.
+        label_columns : list[str]
+            List of columns to be used as the label.
+
+    References
+    ----------
+    .. [1] `TensorFlow Time Series Example
+        <https://www.tensorflow.org/tutorials/structured_data/time_series>`_
+    """
+
+    def __init__(self, df: pandas.DataFrame, input_width: int,
+                 label_width: int, shift: int, batch_size: int,
+                 label_columns=None):
+        # Split the dataset and store it
+        length = len(df)
+        self.train_df = df[:int(length*0.7)]               # 70%
+        self.val_df = df[int(length*0.7):int(length*0.9)]  # 20%
+        self.test_df = df[int(length*0.9):]                # 10%
+
+        # Work out the label column indices.
+        self.column_indices = {name: i for i, name in
+                               enumerate(self.train_df.columns)}
+        self.label_columns = label_columns
+        if label_columns is not None:
+            self.label_columns_indices = {
+                name: i for i, name in enumerate(label_columns)}
+
+        # Work out the window parameters.
+        self.input_width = input_width
+        self.label_width = label_width
+        self.shift = shift
+
+        self.batch_size = batch_size
+
+        self.total_window_size = input_width + shift
+
+        self.input_slice = slice(0, input_width)
+        self.input_indices = np.arange(self.total_window_size)[
+            self.input_slice]
+
+        self.label_start = self.total_window_size - self.label_width
+        self.labels_slice = slice(self.label_start, None)
+        self.label_indices = np.arange(self.total_window_size)[
+            self.labels_slice]
+
+    def __repr__(self):
+        """Print Window information."""
+        return "\n".join([
+            f"Total window size: {self.total_window_size}",
+            f"Input indices: {self.input_indices}",
+            f"Label indices: {self.label_indices}",
+            f"Label column name(s): {self.label_columns}"])
+
+    def make_dataset(self, data: pandas.DataFrame) -> MapDataset:
+        """Generate windowed dataset for training from continuous dataset.
+
+        Parameters
+        ---------
+        data : DataFrame
+            DataFrame containing the continuous dataset.
+
+        Returns
+        -------
+        MapDataset
+            Pair of (input, label)
+            where the shape of input is (n, input_width, n_columns)
+            and the shape of label is (n, label_width, n_columns)
+        """
+        data = np.array(data, dtype=np.float32)
+        ds = tf.keras.preprocessing.timeseries_dataset_from_array(
+            data=data,
+            targets=None,
+            sequence_length=self.total_window_size,
+            sequence_stride=1,
+            shuffle=True,
+            batch_size=self.batch_size,)
+        ds = ds.map(self.split_window)
+        return ds
+
+    @property
+    def train(self):
+        """Make training dataset."""
+        return self.make_dataset(self.train_df)
+
+    @property
+    def val(self):
+        """Make validation dataset."""
+        return self.make_dataset(self.val_df)
+
+    @property
+    def test(self):
+        """Make testing dataset."""
+        return self.make_dataset(self.test_df)
+
+    @lru_cache
+    def get_example(self,
+                    dataset: str = "train") -> Tuple[tf.Tensor, tf.Tensor]:
+        """Get and cache an example batch of `inputs, labels` for plotting.
+
+        Parameters
+        ----------
+            dataset : str
+                One of "train", "val", or "test".
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Pair of (input, label), respectively of shape
+            (batch_size, input_size, n_feature) and
+            (batch_size, label_size, n_feature).
+        """
+        return next(iter(getattr(self, dataset)))
+
+    def split_window(self, features: tf.Tensor) -> Tuple:
+        """Magic. Something that I don't understand. Comment & typing TODO."""
+        inputs = features[:, self.input_slice, :]
+        labels = features[:, self.labels_slice, :]
+        if self.label_columns is not None:
+            labels = tf.stack(
+                [labels[:, :, self.column_indices[name]]
+                    for name in self.label_columns],
+                axis=-1)
+
+        # Slicing doesn't preserve static shape information, so set the shapes
+        # manually. This way the `tf.data.Datasets` are easier to inspect.
+        inputs.set_shape([None, self.input_width, None])
+        labels.set_shape([None, self.label_width, None])
+
+        return inputs, labels
+
+    def plot(
+        self,
+        *,
+        model: Optional[tf.keras.Model] = None,
+        plot_col: Optional[str] = None,
+        max_subplots: int = 3,
+        dataset: str = "train",
+        network_name: Optional[str] = None,
+        station_name: Optional[str] = None
+    ):
+        """Plot the specified dataset and its training results.
+
+        Parameters
+        ----------
+            model : Model, optional
+                Trained model.
+            plot_col : str, optional
+                Index of the feature column to plot.
+            max_subplots : int
+                Maximum number of subplots.
+            dataset : str
+                Name of the set.
+            network_name : str, optional
+                Name of the network.
+            station_name : str, optional
+                Name of the station.
+        """
+        # Generate examples from the specified dataset
+        inputs, labels = self.get_example(dataset)
+        # Select the first feature if not specified
+        plot_col = plot_col if plot_col is not None else list(
+            self.column_indices.keys())[0]
+        plot_col_index = self.column_indices[plot_col]
+        # len(inputs) is batch size
+        max_n = min(max_subplots, len(inputs))
+        for n in range(max_n):
+            plt.subplot(max_n, 1, n+1)
+            plt.ylabel(f"{plot_col}")
+            plt.plot(self.input_indices, inputs[n, :, plot_col_index],
+                     label="Inputs", marker=".", zorder=-10)
+            if self.label_columns:
+                label_col_index = self.label_columns_indices.get(
+                    plot_col, None)
+            else:
+                label_col_index = plot_col_index
+            if label_col_index is None:
+                continue
+            plt.scatter(self.label_indices, labels[n, :, label_col_index],
+                        edgecolors="k", label="Labels", c="#2ca02c", s=64)
+            if model is not None:
+                predictions = model(inputs)
+                plt.scatter(self.label_indices,
+                            predictions[n, :, label_col_index],
+                            marker="X", edgecolors="k", label="Predictions",
+                            c="#ff7f0e", s=64)
+            if n == 0:
+                plt.legend()
+        plt.suptitle((f"{network_name} Network " if network_name else "")
+                     + f"Samples for {plot_col} {dataset.capitalize()} Set"
+                     + (f" - Station {station_name}" if station_name else ""))
+        plt.xlabel("Days")
