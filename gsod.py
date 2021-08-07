@@ -3,7 +3,7 @@
 
 from os import PathLike
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas
@@ -195,21 +195,28 @@ class GsodDataset:
         self._basepath = Path(basepath)
 
     @staticmethod
-    def fix_index(dframe: pandas.DataFrame) -> pandas.DataFrame:
+    def fix_index(dframe: pandas.DataFrame, **kwargs) -> pandas.DataFrame:
         """Fix missing date indices.
 
         Parameters
         ----------
         dframe : DataFrame
             DataFrame with a DateIndex to be fixed.
+        **kwargs : dict
+            Following arguments will be passed to DataFrame.reindex.
 
         Returns
         -------
         DataFrame
             The DataFrame after being fixed.
+
+        See Also
+        --------
+        pandas.DataFrame.reindex :
+            Conform Series/DataFrame to new index with optional filling logic.
         """
         new_idx = pandas.date_range(min(dframe.index), max(dframe.index))
-        return dframe.reindex(new_idx)
+        return dframe.reindex(new_idx, **kwargs)
 
     def read_at(self, path: PathLike) -> pandas.DataFrame:
         """Read the file at `path`.
@@ -253,8 +260,8 @@ class GsodDataset:
         ).sort_values("DATE")
 
     def read_continuous(self, *, stn: str, year: str = "????",
-                        wban: str = "?????",
-                        interpolate: bool = False) -> pandas.DataFrame:
+                        wban: str = "?????", interpolate: bool = False,
+                        fill: Optional[str] = None) -> pandas.DataFrame:
         """Read the files as specified and make the index continuous.
 
         Parameters
@@ -268,11 +275,15 @@ class GsodDataset:
             If specified, it must match the given `stn`.
         interpolate : bool
             Whether to linearly interpolate missing datapoints.
+        fill : str, optional
+            Method of filling missing datapoints: "ffill", "bfill", or None.
+            If None is specified, some fields will be converted to float.
 
         Returns
         -------
         DataFrame
             Combined DataFrame from all matched files, sorted by date.
         """
-        fixed = self.fix_index(self.read(stn=stn, year=year, wban=wban))
+        fixed = self.fix_index(
+            self.read(stn=stn, year=year, wban=wban), method=fill)
         return fixed.interpolate() if interpolate else fixed
