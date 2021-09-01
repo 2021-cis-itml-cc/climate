@@ -154,43 +154,43 @@ class GsodDataset:
         #            digit).
     ]
     # Names to use for the pandas DataFrame columns.
-    _NAMES: List[str] = ["STN", "WBAN", "DATE", "TEMP", "TEMP_COUNT", "DEWP",
-                         "DEWP_COUNT", "SLP", "SLP_COUNT", "STP", "STP_COUNT",
-                         "VISIB", "VISIB_COUNT", "WDSP", "WDSP_COUNT", "MXSPD",
-                         "GUST", "MAX", "MAX_FLAG", "MIN", "MIN_FLAG", "PRCP",
-                         "PRCP_FLAG", "SNDP", "FOG", "RAIN", "SNOW", "HAIL",
-                         "THUNDER", "TORNADO"]
+    _NAMES: List[str] = ["STN", "WBAN", "DATE", "TEMP", "COUNT_TEMP", "DEWP",
+                         "COUNT_DEWP", "SLP", "COUNT_SLP", "STP", "COUNT_STP",
+                         "VISIB", "COUNT_VISIB", "WDSP", "COUNT_WDSP", "MXSPD",
+                         "GUST", "MAX", "FLAG_MAX", "MIN", "FLAG_MIN", "PRCP",
+                         "FLAG_PRCP", "SNDP", "FOG", "RAIN_DRIZZLE", "SNOW",
+                         "HAIL", "THUNDER", "TORNADO_FUNNEL_CLOUD"]
     # Datatypes to use for the columns.
     _DTYPES: Dict[str, str] = {
         "STN": "uint32",
         "WBAN": "int64",
         "TEMP": "float64",
-        "TEMP_COUNT": "uint8",
+        "COUNT_TEMP": "uint8",
         "DEWP": "float64",
-        "DEWP_COUNT": "uint8",
+        "COUNT_DEWP": "uint8",
         "SLP": "float64",
-        "SLP_COUNT": "uint8",
+        "COUNT_SLP": "uint8",
         "STP": "float64",
-        "STP_COUNT": "uint8",
+        "COUNT_STP": "uint8",
         "VISIB": "float64",
-        "VISIB_COUNT": "uint8",
+        "COUNT_VISIB": "uint8",
         "WDSP": "float64",
-        "WDSP_COUNT": "uint8",
+        "COUNT_WDSP": "uint8",
         "MXSPD": "float64",
         "GUST": "float64",
         "MAX": "float64",
-        "MAX_FLAG": "U1",
+        "FLAG_MAX": "U1",
         "MIN": "float64",
-        "MIN_FLAG": "U1",
+        "FLAG_MIN": "U1",
         "PRCP": "float64",
-        "PRCP_FLAG": "U1",
+        "FLAG_PRCP": "U1",
         "SNDP": "float64",
         "FOG": "bool",
         "RAIN": "bool",
-        "SNOW": "bool",
+        "SNOW_ICE_PELLETS": "bool",
         "HAIL": "bool",
         "THUNDER": "bool",
-        "TORNADO": "bool"
+        "TORNADO_FUNNEL_CLOUD": "bool"
     }
 
     def __init__(self, basepath: PathLike):
