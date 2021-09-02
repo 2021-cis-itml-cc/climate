@@ -1,7 +1,6 @@
 
 """GSOD Dataset helper."""
 
-import fnmatch
 import logging
 import os
 from functools import lru_cache
@@ -190,9 +189,24 @@ class GsodDatasetBase:
         "THUNDER": "bool",
         "TORNADO_FUNNEL_CLOUD": "bool"
     }
+    # Values that denotes missing values
+    _MISSINGS: Dict[str, float] = {
+        "TEMP": 9999.9,
+        "DEWP": 9999.9,
+        "SLP": 9999.9,
+        "STP": 9999.9,
+        "VISIB": 999.9,
+        "WDSP": 999.9,
+        "MXSPD": 999.9,
+        "GUST": 999.9,
+        "MAX": 9999.9,
+        "MIN": 9999.9,
+        "PRCP": 99.99,
+        "SNDP": 999.9
+    }
 
     @staticmethod
-    def fix_index(dframe: pandas.DataFrame, **kwargs) -> pandas.DataFrame:
+    def _fix_index(dframe: pandas.DataFrame, **kwargs) -> pandas.DataFrame:
         """Fix missing date indices.
 
         Parameters
@@ -246,7 +260,7 @@ class GsodDatasetBase:
         DataFrame
             Combined DataFrame from all matched files, sorted by date.
         """
-        fixed = self.fix_index(
+        fixed = self._fix_index(
             self.read(stn=stn, year=year, wban=wban), method=fill)
         return fixed.interpolate() if interpolate else fixed
 
@@ -277,11 +291,11 @@ class GsodDiskDataset(GsodDatasetBase):
             The read table as-is.
         """
         dataframe = pandas.read_fwf(path, index_col=2, header=0,
-                                    dtype=self._DTYPES,
+                                    dtype=self._DTYPES, names=self._NAMES,
                                     colspecs=self._COLSPEC, parse_dates=[2],
-                                    names=self._NAMES, compression="infer")
-        # read_fwf does not play well with empty U1 fields
-        return dataframe.fillna({"FLAG_MAX": " ", "FLAG_MIN": " "})
+                                    compression="infer", keep_default_na=False,
+                                    na_values=self._MISSINGS)
+        return dataframe
 
     def read(self, *, stn: str, year: str = "????",
              wban: str = "?????") -> pandas.DataFrame:
@@ -315,10 +329,15 @@ class GsodBigQueryDataset(GsodDatasetBase):
 
     Warnings
     --------
-    Some fields in the BigQuery GSOD dataset are corrupted!
+    Ideally, what returned by GsodBigQueryDataset.read should compare
+    pandas.equal() to that by GsodDiskDataset.read with the same parameters.
+    However, some fields in the BigQuery GSOD dataset are corrupted!
     Namely, some of the STP values are reduced by 1000.0 if the value
     exceeds 1000.0.
     And some of the FRSHTT flags are different from the downloaded dataset.
+    It is also noticed that some of the real fields are off compared
+    to the downloaded data. One of the largest differences I've noticed is
+    the TEMP field of station 722860 on 2017-12-30, giving 51.2 and 47.8.
     Proceed with care for those fields.
 
     See Also
@@ -336,8 +355,10 @@ class GsodBigQueryDataset(GsodDatasetBase):
     """
 
     _QUERY = """SELECT *
-    FROM `bigquery-public-data.noaa_gsod.{table_id}`
-    WHERE stn LIKE '{stn}' AND wban LIKE '{wban}'"""
+    FROM `bigquery-public-data.noaa_gsod.gsod*`
+    WHERE stn LIKE '{stn}'
+    AND wban LIKE '{wban}'
+    AND _TABLE_SUFFIX LIKE '{year}'"""
 
     def __init__(self):
         # Defer this import unless required
@@ -345,11 +366,6 @@ class GsodBigQueryDataset(GsodDatasetBase):
         from google.cloud import bigquery
         client = bigquery.Client()
         self._client = client
-        gsod_data_ref = client.dataset(
-            "noaa_gsod", project="bigquery-public-data")
-        gsod_dataset = client.get_dataset(gsod_data_ref)
-        self._table_ids = [
-            x.table_id for x in client.list_tables(gsod_dataset)]
 
     def _transform_dataframe(
         self,
@@ -367,8 +383,14 @@ class GsodBigQueryDataset(GsodDatasetBase):
         DataFrame
             Transformed DataFrame.
         """
+        dates = pandas.to_datetime({
+            "year": dataframe.year,
+            "month": dataframe.mo,
+            "day": dataframe.da
+        })
         # This line duplicates dataframe
         dataframe = dataframe.drop(columns=["year", "mo", "da"])
+        dataframe["date"] = dates
         # So it is not overwriten here
         dataframe.columns = dataframe.columns.str.upper()
         # Convert those boolean fields to int
@@ -376,7 +398,8 @@ class GsodBigQueryDataset(GsodDatasetBase):
         for field in ("FOG", "RAIN_DRIZZLE", "SNOW_ICE_PELLETS", "HAIL",
                       "THUNDER", "TORNADO_FUNNEL_CLOUD"):
             dataframe[field] = dataframe[field].astype("uint8")
-        rep = {"None": " "}
+        # Replace map for FLAG_MIN/MAX
+        rep = {"None": ""}
         return (dataframe
                 # This is a bug in BigQuery NOAA GSOD
                 .rename(columns={"MXPSD": "MXSPD"})
@@ -384,6 +407,8 @@ class GsodBigQueryDataset(GsodDatasetBase):
                 .astype(self._DTYPES)
                 # Make this consistent
                 .replace({"FLAG_MAX": rep, "FLAG_MIN": rep})
+                # And deal with missing values
+                .replace(self._MISSINGS, np.NaN)
                 # Index and sort by date
                 .set_index("DATE")
                 .sort_index()
@@ -428,17 +453,13 @@ class GsodBigQueryDataset(GsodDatasetBase):
         DataFrame
             Combined DataFrame from all matched files, sorted by date.
         """
-        # Glob the table ids
-        matched_table_ids = fnmatch.filter(self._table_ids, "gsod" + year)
-        # Convert glob to SQL LIKE
         stn = self._translate_sql_like(stn)
+        year = self._translate_sql_like(year)
         wban = self._translate_sql_like(wban)
         # Run queries
-        data = pandas.concat(
-            self._client.query(self._QUERY.format(
-                table_id=table_id, stn=stn, wban=wban)).result().to_dataframe()
-            for table_id in matched_table_ids
-        )
+        data = self._client.query(
+            self._QUERY.format(stn=stn, year=year, wban=wban)
+        ).result().to_dataframe()
         # Transform the result
         return self._transform_dataframe(data)
 
