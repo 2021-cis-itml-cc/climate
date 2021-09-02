@@ -1,6 +1,7 @@
 
 """GSOD Dataset helper."""
 
+import fnmatch
 import logging
 import os
 from functools import lru_cache
@@ -71,13 +72,8 @@ def sliding_window(seq: NDArray, width: int) -> NDArray:
     return np.array([seq[n:n + width] for n in range(len(seq) - width + 1)])
 
 
-class GsodDataset:
+class GsodDatasetBase:
     """GSOD Dataset reader and preprocessor.
-
-    Parameters
-    ----------
-    basepath : PathLike
-        Path to GSOD. The next level should be year folders.
 
     References
     ----------
@@ -158,12 +154,14 @@ class GsodDataset:
                          "COUNT_DEWP", "SLP", "COUNT_SLP", "STP", "COUNT_STP",
                          "VISIB", "COUNT_VISIB", "WDSP", "COUNT_WDSP", "MXSPD",
                          "GUST", "MAX", "FLAG_MAX", "MIN", "FLAG_MIN", "PRCP",
-                         "FLAG_PRCP", "SNDP", "FOG", "RAIN_DRIZZLE", "SNOW",
-                         "HAIL", "THUNDER", "TORNADO_FUNNEL_CLOUD"]
-    # Datatypes to use for the columns.
+                         "FLAG_PRCP", "SNDP", "FOG", "RAIN_DRIZZLE",
+                         "SNOW_ICE_PELLETS", "HAIL", "THUNDER",
+                         "TORNADO_FUNNEL_CLOUD"]
+    # Data types to use for the columns.
     _DTYPES: Dict[str, str] = {
         "STN": "uint32",
         "WBAN": "int64",
+        "DATE": "datetime64[D]",
         "TEMP": "float64",
         "COUNT_TEMP": "uint8",
         "DEWP": "float64",
@@ -186,15 +184,12 @@ class GsodDataset:
         "FLAG_PRCP": "U1",
         "SNDP": "float64",
         "FOG": "bool",
-        "RAIN": "bool",
+        "RAIN_DRIZZLE": "bool",
         "SNOW_ICE_PELLETS": "bool",
         "HAIL": "bool",
         "THUNDER": "bool",
         "TORNADO_FUNNEL_CLOUD": "bool"
     }
-
-    def __init__(self, basepath: PathLike):
-        self._basepath = Path(basepath)
 
     @staticmethod
     def fix_index(dframe: pandas.DataFrame, **kwargs) -> pandas.DataFrame:
@@ -219,6 +214,54 @@ class GsodDataset:
         """
         new_idx = pandas.date_range(min(dframe.index), max(dframe.index))
         return dframe.reindex(new_idx, **kwargs)
+
+    def read(self, *, stn: str, year: str = "????",
+             wban: str = "?????") -> pandas.DataFrame:
+        """Proxy function for child classes to implement."""
+        raise NotImplementedError(
+            "Call a child implementation instead of this class")
+
+    def read_continuous(self, *, stn: str, year: str = "????",
+                        wban: str = "?????", interpolate: bool = False,
+                        fill: Optional[str] = None) -> pandas.DataFrame:
+        """Read the files as specified and make the index continuous.
+
+        Parameters
+        ----------
+        stn : str
+            WMO/DATSAV3 Station number as a 6-char string.
+        year : str
+            Year as a 4-char string.
+        wban : str, optional
+            Weather Bureau Air Force Navy number. Default: all.
+            If specified, it must match the given `stn`.
+        interpolate : bool
+            Whether to linearly interpolate missing datapoints.
+        fill : str, optional
+            Method of filling missing datapoints: "ffill", "bfill", or None.
+            If None is specified, some fields will be converted to float.
+
+        Returns
+        -------
+        DataFrame
+            Combined DataFrame from all matched files, sorted by date.
+        """
+        fixed = self.fix_index(
+            self.read(stn=stn, year=year, wban=wban), method=fill)
+        return fixed.interpolate() if interpolate else fixed
+
+
+class GsodDiskDataset(GsodDatasetBase):
+    """GSOD Dataset on disk.
+
+    Parameters
+    ----------
+    basepath : PathLike
+        Path to GSOD. The next level should be year folders.
+    """
+
+    def __init__(self, basepath: PathLike):
+        self._basepath = Path(basepath)
 
     def read_at(self, path: PathLike) -> pandas.DataFrame:
         """Read the file at `path`.
@@ -256,15 +299,106 @@ class GsodDataset:
         DataFrame
             Combined DataFrame from all matched files, sorted by date.
         """
-        return pandas.concat((
+        return pandas.concat(
             self.read_at(p)
-            for p in self._basepath.glob(f"{year}/{stn}-{wban}-{year}.op*"))
-        ).sort_values("DATE")
+            for p in self._basepath.glob(f"{year}/{stn}-{wban}-{year}.op*")
+        ).sort_index()
 
-    def read_continuous(self, *, stn: str, year: str = "????",
-                        wban: str = "?????", interpolate: bool = False,
-                        fill: Optional[str] = None) -> pandas.DataFrame:
-        """Read the files as specified and make the index continuous.
+
+class GsodBigQueryDataset(GsodDatasetBase):
+    """GSOD Dataset queries though Google BigQuery.
+
+    Please set appropriate authorization before invoking.
+
+    Warnings
+    --------
+    Some fields in the BigQuery GSOD dataset are corrupted!
+    Namely, some of the STP values are reduced by 1000.0 if the value
+    exceeds 1000.0.
+
+    See Also
+    --------
+    google.auth.default :
+        Authentication to Google APIs
+        <https://googleapis.dev/python/google-api-core/latest/auth.html>
+
+    References
+    ----------
+    .. [1] `Kaggle NOAA GSOD Metadata
+        <https://www.kaggle.com/noaa/gsod/metadata>`_
+    .. [2] `Google BigQuery Reference
+        <https://googleapis.dev/python/bigquery/latest/reference.html>`_
+    """
+
+    _QUERY = """SELECT *
+    FROM `bigquery-public-data.noaa_gsod.{table_id}`
+    WHERE stn LIKE '{stn}' AND wban LIKE '{wban}'"""
+
+    def __init__(self):
+        # Defer this import unless required
+        # pylint: disable=import-outside-toplevel
+        from google.cloud import bigquery
+        client = bigquery.Client()
+        self._client = client
+        gsod_data_ref = client.dataset(
+            "noaa_gsod", project="bigquery-public-data")
+        gsod_dataset = client.get_dataset(gsod_data_ref)
+        self._table_ids = [
+            x.table_id for x in client.list_tables(gsod_dataset)]
+
+    def _transform_dataframe(
+        self,
+        dataframe: pandas.DataFrame
+    ) -> pandas.DataFrame:
+        """Transform a NOAA GSOD BigQuery DataFrame to our format.
+
+        Parameters
+        ----------
+        dataframe : DataFrame
+            DataFrame to operate on.
+
+        Returns
+        -------
+        DataFrame
+            Transformed DataFrame.
+        """
+        # This line duplicates dataframe
+        dataframe = dataframe.drop(columns=["year", "mo", "da"])
+        # So it is not overwriten here
+        dataframe.columns = dataframe.columns.str.upper()
+        return (dataframe
+                # This is a bug in BigQuery NOAA GSOD
+                .rename(columns={"MXPSD": "MXSPD"})
+                # Convert objects to numeric
+                .astype(self._DTYPES)
+                .set_index("DATE")
+                # Sort by date
+                .sort_index()
+                )
+
+    @staticmethod
+    def _translate_sql_like(unix_glob: str) -> str:
+        """Translate Unix glob to SQL LIKE patterns.
+
+        This method only performs this replacement:
+            '?' -> '_', '*' -> '%'
+
+        Parameters
+        ----------
+        unix_glob : str
+            Unix glob pattern.
+
+        Returns
+        -------
+        str
+            SQL LIKE pattern.
+        """
+        trans_table = str.maketrans({'?': '_', '*': '%'})
+        return unix_glob.translate(trans_table)
+
+    def read(self, *, stn: str, year: str = "????",
+             wban: str = "?????") -> pandas.DataFrame:
+        """Query data as specified.
 
         Parameters
         ----------
@@ -275,29 +409,60 @@ class GsodDataset:
         wban : str, optional
             Weather Bureau Air Force Navy number. Default: all.
             If specified, it must match the given `stn`.
-        interpolate : bool
-            Whether to linearly interpolate missing datapoints.
-        fill : str, optional
-            Method of filling missing datapoints: "ffill", "bfill", or None.
-            If None is specified, some fields will be converted to float.
 
         Returns
         -------
         DataFrame
             Combined DataFrame from all matched files, sorted by date.
         """
-        fixed = self.fix_index(
-            self.read(stn=stn, year=year, wban=wban), method=fill)
-        return fixed.interpolate() if interpolate else fixed
+        # Glob the table ids
+        matched_table_ids = fnmatch.filter(self._table_ids, "gsod" + year)
+        # Convert glob to SQL LIKE
+        stn = self._translate_sql_like(stn)
+        wban = self._translate_sql_like(wban)
+        # Run queries
+        data = pandas.concat(
+            self._client.query(self._QUERY.format(
+                table_id=table_id, stn=stn, wban=wban)).result().to_dataframe()
+            for table_id in matched_table_ids
+        )
+        # Transform the result
+        return self._transform_dataframe(data)
 
-# Sliding Window Generator.
-# Mostly from [TensorFlow Time Series Example]
-# (https://www.tensorflow.org/tutorials/structured_data/time_series),
-# but also includes my own comments and modifications.
+
+class GsodDataset(GsodDatasetBase):
+    """Choose a GSOD Dataset automatically.
+
+    Parameters
+    ----------
+    basepath : PathLike, optional
+        Path to GSOD. The next level should be year folders.
+    """
+
+    def __init__(self, basepath: PathLike = None):
+        if basepath:
+            self.inner: GsodDatasetBase = GsodDiskDataset(basepath=basepath)
+        elif "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
+            try:
+                self.inner = GsodBigQueryDataset()
+            except ImportError as imp_error:
+                raise ValueError(
+                    "Base path nor Google BigQuery available") from imp_error
+        else:
+            raise ValueError("Base path nor Google authentication available")
+
+    def read(self, *args, **kwargs):
+        return self.inner.read(*args, **kwargs)
 
 
+# pylint: disable=too-many-instance-attributes
 class WindowGenerator:
     """Build a window from the data for training.
+
+       Sliding Window Generator.
+       Mostly from [TensorFlow Time Series Example]
+       (https://www.tensorflow.org/tutorials/structured_data/time_series),
+       but also includes my own comments and modifications.
 
                        | - - total size - - |
         input_indices: 0 1 2 3 4 5
@@ -326,6 +491,7 @@ class WindowGenerator:
         <https://www.tensorflow.org/tutorials/structured_data/time_series>`_
     """
 
+    # pylint: disable=too-many-arguments
     def __init__(self, df: pandas.DataFrame, input_width: int,
                  label_width: int, shift: int, batch_size: int,
                  label_columns=None):
@@ -385,15 +551,14 @@ class WindowGenerator:
             and the shape of label is (n, label_width, n_columns)
         """
         data = np.array(data, dtype=np.float32)
-        ds = tf.keras.preprocessing.timeseries_dataset_from_array(
+        dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
             data=data,
             targets=None,
             sequence_length=self.total_window_size,
             sequence_stride=1,
             shuffle=True,
             batch_size=self.batch_size,)
-        ds = ds.map(self.split_window)
-        return ds
+        return dataset.map(self.split_window)
 
     @property
     def train(self):
