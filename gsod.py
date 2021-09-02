@@ -277,7 +277,8 @@ class GsodDiskDataset(GsodDatasetBase):
     def __init__(self, basepath: PathLike):
         self._basepath = Path(basepath)
 
-    def read_at(self, path: PathLike) -> pandas.DataFrame:
+    @classmethod
+    def read_at(cls, path: PathLike) -> pandas.DataFrame:
         """Read the file at `path`.
 
         Parameters
@@ -291,10 +292,10 @@ class GsodDiskDataset(GsodDatasetBase):
             The read table as-is.
         """
         dataframe = pandas.read_fwf(path, index_col=2, header=0,
-                                    dtype=self._DTYPES, names=self._NAMES,
-                                    colspecs=self._COLSPEC, parse_dates=[2],
+                                    dtype=cls._DTYPES, names=cls._NAMES,
+                                    colspecs=cls._COLSPEC, parse_dates=[2],
                                     compression="infer", keep_default_na=False,
-                                    na_values=self._MISSINGS)
+                                    na_values=cls._MISSINGS)
         return dataframe
 
     def read(self, *, stn: str, year: str = "????",
@@ -367,8 +368,9 @@ class GsodBigQueryDataset(GsodDatasetBase):
         client = bigquery.Client()
         self._client = client
 
+    @classmethod
     def _transform_dataframe(
-        self,
+        cls,
         dataframe: pandas.DataFrame
     ) -> pandas.DataFrame:
         """Transform a NOAA GSOD BigQuery DataFrame to our format.
@@ -404,11 +406,11 @@ class GsodBigQueryDataset(GsodDatasetBase):
                 # This is a bug in BigQuery NOAA GSOD
                 .rename(columns={"MXPSD": "MXSPD"})
                 # Convert objects to numeric - makes another copy
-                .astype(self._DTYPES)
+                .astype(cls._DTYPES)
                 # Make this consistent
                 .replace({"FLAG_MAX": rep, "FLAG_MIN": rep})
                 # And deal with missing values
-                .replace(self._MISSINGS, np.NaN)
+                .replace(cls._MISSINGS, np.NaN)
                 # Index and sort by date
                 .set_index("DATE")
                 .sort_index()
@@ -582,7 +584,7 @@ class WindowGenerator:
         """Generate windowed dataset for training from continuous dataset.
 
         Parameters
-        ---------
+        ----------
         data : DataFrame
             DataFrame containing the continuous dataset.
 
