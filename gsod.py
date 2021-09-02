@@ -276,9 +276,12 @@ class GsodDiskDataset(GsodDatasetBase):
         DataFrame
             The read table as-is.
         """
-        return pandas.read_fwf(path, index_col=2, header=0, dtype=self._DTYPES,
-                               colspecs=self._COLSPEC, parse_dates=[2],
-                               names=self._NAMES, compression="infer")
+        dataframe = pandas.read_fwf(path, index_col=2, header=0,
+                                    dtype=self._DTYPES,
+                                    colspecs=self._COLSPEC, parse_dates=[2],
+                                    names=self._NAMES, compression="infer")
+        # read_fwf does not play well with empty U1 fields
+        return dataframe.fillna({"FLAG_MAX": " ", "FLAG_MIN": " "})
 
     def read(self, *, stn: str, year: str = "????",
              wban: str = "?????") -> pandas.DataFrame:
@@ -315,6 +318,8 @@ class GsodBigQueryDataset(GsodDatasetBase):
     Some fields in the BigQuery GSOD dataset are corrupted!
     Namely, some of the STP values are reduced by 1000.0 if the value
     exceeds 1000.0.
+    And some of the FRSHTT flags are different from the downloaded dataset.
+    Proceed with care for those fields.
 
     See Also
     --------
@@ -366,13 +371,21 @@ class GsodBigQueryDataset(GsodDatasetBase):
         dataframe = dataframe.drop(columns=["year", "mo", "da"])
         # So it is not overwriten here
         dataframe.columns = dataframe.columns.str.upper()
+        # Convert those boolean fields to int
+        # - otherwise they'll all be True
+        for field in ("FOG", "RAIN_DRIZZLE", "SNOW_ICE_PELLETS", "HAIL",
+                      "THUNDER", "TORNADO_FUNNEL_CLOUD"):
+            dataframe[field] = dataframe[field].astype("uint8")
+        rep = {"None": " "}
         return (dataframe
                 # This is a bug in BigQuery NOAA GSOD
                 .rename(columns={"MXPSD": "MXSPD"})
-                # Convert objects to numeric
+                # Convert objects to numeric - makes another copy
                 .astype(self._DTYPES)
+                # Make this consistent
+                .replace({"FLAG_MAX": rep, "FLAG_MIN": rep})
+                # Index and sort by date
                 .set_index("DATE")
-                # Sort by date
                 .sort_index()
                 )
 
@@ -452,6 +465,15 @@ class GsodDataset(GsodDatasetBase):
             raise ValueError("Base path nor Google authentication available")
 
     def read(self, *args, **kwargs):
+        """Read a GSOD Dataset.
+
+        See Also
+        --------
+        GsodBigQueryDataset.read :
+            read() method of the BigQuery implementor
+        GsodDiskDataset.read :
+            read() method of the Disk implementor
+        """
         return self.inner.read(*args, **kwargs)
 
 
