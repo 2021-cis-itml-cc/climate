@@ -34,6 +34,8 @@ Use those Notebooks by this order to start.
     A comparative LSTM-only approach (optional).
  - [`14-Baseline_and_LR.ipynb`](https://github.com/2021-cis-itml-cc/climate/blob/main/14-Baseline_and_LR.ipynb):
     Building a long short-term memory model.
+ - [`15-ARIMA_and_SVM.ipynb`](https://github.com/2021-cis-itml-cc/climate/blob/main/15-ARIMA_and_SVM.ipynb):
+    Comparative ARIMA and SVM models (optional).
  - [`20-Ensemble.ipynb`](https://github.com/2021-cis-itml-cc/climate/blob/main/20-Ensemble.ipynb):
     Combining different models for different mode functions.
 
