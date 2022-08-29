@@ -48,5 +48,23 @@ Early experiments. Kept here for reference.
  - [`ClimateDiscreteMarkov.ipynb`](https://github.com/2021-cis-itml-cc/climate/blob/main/ClimateDiscreteMarkov.ipynb)
     Any-degree discrete Markov-like model.
 
+## Citation
+BibTeX entry:
+```tex
+@inproceedings{10.1117/12.2637187,
+    author = {Maiyun Zhang and Shuyu Li and Yiqi Wang},
+    title = {Short-term temperature prediction based on hybrid {CEEMDAN}, neural networks, and linear regression methods},
+    volume = {12285},
+    booktitle = {International Conference on Advanced Algorithms and Neural Networks (AANN 2022)},
+    editor = {Rajeev Tiwari},
+    organization = {International Society for Optics and Photonics},
+    publisher = {SPIE},
+    pages = {301 -- 308},
+    year = {2022},
+    doi = {10.1117/12.2637187},
+    URL = {https://doi.org/10.1117/12.2637187}
+}
+```
+
 ## License
 Private until the project is finished. TBD.
